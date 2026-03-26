@@ -1,17 +1,30 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Message } from '@/lib/supabase'
+import { supabaseBrowser } from '@/lib/supabase-browser'
 
 export default function Home() {
+  const [username, setUsername] = useState<string | null>(null)
+  const [usernameInput, setUsernameInput] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
   const [content, setContent] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [sending, setSending] = useState(false)
   const [fetching, setFetching] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [likedIds, setLikedIds] = useState<Set<number>>(new Set())
+  const bottomRef = useRef<HTMLDivElement>(null)
+
+  // Felhasználónév betöltése localStorage-ból
+  useEffect(() => {
+    const stored = localStorage.getItem('uzenofal-username')
+    if (stored) setUsername(stored)
+    const storedLikes = localStorage.getItem('uzenofal-liked')
+    if (storedLikes) {
+      try { setLikedIds(new Set(JSON.parse(storedLikes))) } catch {}
+    }
+  }, [])
 
   async function fetchMessages() {
-    setFetching(true)
     const res = await fetch('/api/messages')
     if (res.ok) {
       const data = await res.json()
@@ -20,197 +33,276 @@ export default function Home() {
     setFetching(false)
   }
 
+  // Első betöltés
   useEffect(() => {
     fetchMessages()
   }, [])
 
-  async function handleSave() {
-    if (!content.trim()) return
-    setLoading(true)
-    setError(null)
+  // Görgetés az aljára új üzeneteknél
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages.length])
 
-    const res = await fetch('/api/messages', {
+  // Valós idejű frissítés Supabase Realtime-mal
+  useEffect(() => {
+    if (!supabaseBrowser) {
+      // Fallback: polling 4 másodpercenként ha nincs realtime
+      const interval = setInterval(fetchMessages, 4000)
+      return () => clearInterval(interval)
+    }
+
+    const channel = supabaseBrowser
+      .channel('uzenofal-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, fetchMessages)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'likes' }, fetchMessages)
+      .subscribe()
+
+    return () => { supabaseBrowser?.removeChannel(channel) }
+  }, [])
+
+  function saveUsername() {
+    const name = usernameInput.trim()
+    if (!name) return
+    localStorage.setItem('uzenofal-username', name)
+    setUsername(name)
+  }
+
+  async function handleSend() {
+    if (!content.trim() || !username) return
+    setSending(true)
+    await fetch('/api/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, author: username }),
     })
+    setContent('')
+    setSending(false)
+    // Ha nincs realtime, manuálisan frissítünk
+    if (!supabaseBrowser) await fetchMessages()
+  }
 
-    if (res.ok) {
-      setContent('')
-      await fetchMessages()
-    } else {
-      const data = await res.json().catch(() => ({}))
-      setError(data.error || 'Hiba történt a mentés során.')
-    }
-    setLoading(false)
+  async function handleLike(id: number) {
+    if (likedIds.has(id)) return
+    await fetch(`/api/messages/${id}/like`, { method: 'POST' })
+    const newLiked = new Set(likedIds).add(id)
+    setLikedIds(newLiked)
+    localStorage.setItem('uzenofal-liked', JSON.stringify([...newLiked]))
+    setMessages(prev => prev.map(m => m.id === id ? { ...m, like_count: m.like_count + 1 } : m))
   }
 
   async function handleDelete(id: number) {
-    const res = await fetch(`/api/messages/${id}`, { method: 'DELETE' })
-    if (res.ok) {
-      setMessages((prev) => prev.filter((m) => m.id !== id))
-    }
+    await fetch(`/api/messages/${id}`, { method: 'DELETE' })
+    setMessages(prev => prev.filter(m => m.id !== id))
   }
 
+  const isOwn = (author: string) => author === username
+
   return (
-    <div style={{ minHeight: '100vh', background: '#f5f6f8' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#f5f6f8' }}>
+
+      {/* Felhasználónév modal */}
+      {!username && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(46,54,73,0.55)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50,
+          backdropFilter: 'blur(2px)',
+        }}>
+          <div style={{
+            background: '#fff', borderRadius: 16, padding: '40px 36px', width: '100%', maxWidth: 380,
+            boxShadow: '0 8px 40px rgba(46,54,73,0.18)', textAlign: 'center',
+          }}>
+            <div style={{ fontSize: 32, marginBottom: 12 }}>👋</div>
+            <h2 style={{ margin: '0 0 8px', fontSize: 22, fontWeight: 700, color: '#2E3649' }}>
+              Üdvözöljük!
+            </h2>
+            <p style={{ margin: '0 0 24px', fontSize: 14, color: '#8a92a3' }}>
+              Add meg a nevedet az üzenetek küldéséhez.
+            </p>
+            <input
+              autoFocus
+              type="text"
+              placeholder="Pl. Kovács Péter"
+              value={usernameInput}
+              maxLength={30}
+              onChange={e => setUsernameInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && saveUsername()}
+              style={{
+                width: '100%', boxSizing: 'border-box', border: '1.5px solid #e0e3e8',
+                borderRadius: 8, padding: '11px 14px', fontSize: 15, color: '#2E3649',
+                outline: 'none', fontFamily: 'inherit', marginBottom: 14,
+              }}
+            />
+            <button
+              onClick={saveUsername}
+              disabled={!usernameInput.trim()}
+              style={{
+                width: '100%', background: usernameInput.trim() ? '#ff6900' : '#f0a070',
+                color: '#fff', border: 'none', borderRadius: 8, padding: '12px 0',
+                fontSize: 15, fontWeight: 600, cursor: usernameInput.trim() ? 'pointer' : 'not-allowed',
+                fontFamily: 'inherit',
+              }}
+            >
+              Belépés
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Header */}
-      <header style={{ background: '#2E3649', padding: '0 24px' }}>
-        <div style={{ maxWidth: 640, margin: '0 auto', display: 'flex', alignItems: 'center', height: 60 }}>
-          <span style={{ color: '#ff6900', fontWeight: 700, fontSize: 22, letterSpacing: '-0.5px' }}>
-            STRT
+      <header style={{
+        background: '#2E3649', padding: '0 20px', flexShrink: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 56,
+      }}>
+        <span style={{ fontWeight: 700, fontSize: 18, color: '#fff', letterSpacing: '-0.3px' }}>
+          <span style={{ color: '#ff6900' }}>STRT</span> Üzenőfal
+        </span>
+        {username && (
+          <span style={{
+            fontSize: 13, color: '#a0a8b8', background: 'rgba(255,255,255,0.08)',
+            padding: '4px 12px', borderRadius: 20,
+          }}>
+            {username}
           </span>
-          <span style={{ color: '#ffffff', fontWeight: 400, fontSize: 22, marginLeft: 2 }}>
-            {' '}Üzenőfal
-          </span>
-        </div>
+        )}
       </header>
 
-      {/* Main */}
-      <main style={{ maxWidth: 640, margin: '0 auto', padding: '40px 24px' }}>
+      {/* Üzenetek */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '20px 16px' }}>
+        <div style={{ maxWidth: 680, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {fetching ? (
+            <p style={{ textAlign: 'center', color: '#a0a8b8', padding: '40px 0' }}>Betöltés...</p>
+          ) : messages.length === 0 ? (
+            <p style={{ textAlign: 'center', color: '#a0a8b8', padding: '40px 0' }}>
+              Még nincs üzenet. Légy az első!
+            </p>
+          ) : messages.map(msg => {
+            const own = isOwn(msg.author)
+            const liked = likedIds.has(msg.id)
+            return (
+              <div key={msg.id} style={{
+                display: 'flex', flexDirection: 'column',
+                alignItems: own ? 'flex-end' : 'flex-start',
+              }}>
+                {/* Név */}
+                <span style={{
+                  fontSize: 11, fontWeight: 600, color: '#8a92a3',
+                  marginBottom: 4, marginLeft: own ? 0 : 4, marginRight: own ? 4 : 0,
+                  letterSpacing: '0.04em', textTransform: 'uppercase',
+                }}>
+                  {own ? 'Te' : msg.author}
+                </span>
 
-        {/* Beviteli kártya */}
-        <div style={{
-          background: '#ffffff',
-          borderRadius: 12,
-          padding: 28,
-          marginBottom: 32,
-          boxShadow: '0 2px 12px rgba(46,54,73,0.08)',
-          border: '1px solid #e8eaed'
-        }}>
-          <label style={{ display: 'block', fontWeight: 600, fontSize: 14, color: '#2E3649', marginBottom: 10 }}>
-            Új üzenet
-          </label>
+                {/* Buborék */}
+                <div style={{
+                  maxWidth: '72%', background: own ? '#2E3649' : '#ffffff',
+                  color: own ? '#ffffff' : '#2E3649',
+                  borderRadius: own ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+                  padding: '12px 16px',
+                  boxShadow: '0 2px 8px rgba(46,54,73,0.09)',
+                  border: own ? 'none' : '1px solid #e8eaed',
+                  fontSize: 15, lineHeight: 1.55, whiteSpace: 'pre-wrap',
+                }}>
+                  {msg.content}
+                </div>
+
+                {/* Like + idő + törlés */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  marginTop: 5, flexDirection: own ? 'row-reverse' : 'row',
+                }}>
+                  <span style={{ fontSize: 11, color: '#b0b8c8' }}>
+                    {new Date(msg.created_at).toLocaleString('hu-HU', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                  </span>
+
+                  <button
+                    onClick={() => handleLike(msg.id)}
+                    title={liked ? 'Már like-oltad' : 'Like'}
+                    style={{
+                      background: 'none', border: 'none', cursor: liked ? 'default' : 'pointer',
+                      padding: '2px 6px', borderRadius: 20, fontSize: 13,
+                      display: 'flex', alignItems: 'center', gap: 4,
+                      color: liked ? '#ff6900' : '#a0a8b8',
+                      fontFamily: 'inherit', transition: 'color 0.15s',
+                    }}
+                  >
+                    <span style={{ fontSize: 15 }}>{liked ? '❤️' : '🤍'}</span>
+                    {msg.like_count > 0 && (
+                      <span style={{ fontWeight: 600, fontSize: 12 }}>{msg.like_count}</span>
+                    )}
+                  </button>
+
+                  {own && (
+                    <button
+                      onClick={() => handleDelete(msg.id)}
+                      style={{
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        fontSize: 11, color: '#c0c8d8', padding: '2px 4px',
+                        fontFamily: 'inherit', transition: 'color 0.15s',
+                      }}
+                      onMouseEnter={e => (e.target as HTMLElement).style.color = '#cf2e2e'}
+                      onMouseLeave={e => (e.target as HTMLElement).style.color = '#c0c8d8'}
+                    >
+                      Törlés
+                    </button>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+          <div ref={bottomRef} />
+        </div>
+      </div>
+
+      {/* Input */}
+      <div style={{
+        borderTop: '1px solid #e8eaed', background: '#ffffff', padding: '14px 16px',
+        flexShrink: 0,
+      }}>
+        <div style={{ maxWidth: 680, margin: '0 auto', display: 'flex', gap: 10 }}>
           <textarea
-            rows={3}
-            placeholder="Írj egy üzenetet..."
+            rows={1}
+            placeholder={username ? 'Írj egy üzenetet...' : 'Lépj be a küldéshez...'}
             value={content}
-            onChange={(e) => setContent(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && e.ctrlKey) handleSave() }}
+            disabled={!username}
+            onChange={e => setContent(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
+            }}
             style={{
-              width: '100%',
-              border: '1.5px solid #e0e3e8',
-              borderRadius: 8,
-              padding: '12px 14px',
-              fontSize: 15,
-              color: '#2E3649',
-              background: '#f9fafb',
-              resize: 'none',
-              outline: 'none',
-              boxSizing: 'border-box',
-              fontFamily: 'inherit',
-              transition: 'border-color 0.15s',
+              flex: 1, border: '1.5px solid #e0e3e8', borderRadius: 10,
+              padding: '10px 14px', fontSize: 15, color: '#2E3649', background: '#f9fafb',
+              resize: 'none', outline: 'none', fontFamily: 'inherit', lineHeight: 1.5,
             }}
             onFocus={e => e.target.style.borderColor = '#ff6900'}
             onBlur={e => e.target.style.borderColor = '#e0e3e8'}
           />
-          {error && (
-            <p style={{ color: '#cf2e2e', fontSize: 13, marginTop: 8 }}>{error}</p>
-          )}
           <button
-            onClick={handleSave}
-            disabled={loading || !content.trim()}
+            onClick={handleSend}
+            disabled={sending || !content.trim() || !username}
             style={{
-              marginTop: 14,
-              width: '100%',
-              background: loading || !content.trim() ? '#f0a070' : '#ff6900',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: 8,
-              padding: '12px 0',
-              fontSize: 15,
-              fontWeight: 600,
-              cursor: loading || !content.trim() ? 'not-allowed' : 'pointer',
-              fontFamily: 'inherit',
-              transition: 'background 0.15s',
-              letterSpacing: '0.01em',
+              background: sending || !content.trim() || !username ? '#f0a070' : '#ff6900',
+              color: '#fff', border: 'none', borderRadius: 10,
+              padding: '0 22px', fontSize: 15, fontWeight: 600,
+              cursor: sending || !content.trim() || !username ? 'not-allowed' : 'pointer',
+              fontFamily: 'inherit', whiteSpace: 'nowrap',
             }}
           >
-            {loading ? 'Mentés...' : 'Mentés'}
+            {sending ? '...' : 'Küldés'}
           </button>
         </div>
-
-        {/* Lista */}
-        <div>
-          <h2 style={{ fontSize: 13, fontWeight: 600, color: '#8a92a3', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 16 }}>
-            Üzenetek
-          </h2>
-
-          {fetching ? (
-            <p style={{ color: '#8a92a3', textAlign: 'center', padding: '32px 0' }}>Betöltés...</p>
-          ) : messages.length === 0 ? (
-            <div style={{
-              background: '#ffffff',
-              borderRadius: 12,
-              padding: '32px 24px',
-              textAlign: 'center',
-              color: '#8a92a3',
-              fontSize: 15,
-              border: '1px solid #e8eaed'
-            }}>
-              Még nincs üzenet. Légy az első!
-            </div>
-          ) : (
-            <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {messages.map((msg) => (
-                <li key={msg.id} style={{
-                  background: '#ffffff',
-                  borderRadius: 12,
-                  padding: '16px 20px',
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  justifyContent: 'space-between',
-                  gap: 16,
-                  boxShadow: '0 1px 4px rgba(46,54,73,0.06)',
-                  border: '1px solid #e8eaed',
-                }}>
-                  <div style={{ flex: 1 }}>
-                    <p style={{ margin: 0, fontSize: 15, color: '#2E3649', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
-                      {msg.content}
-                    </p>
-                    <p style={{ margin: '6px 0 0', fontSize: 12, color: '#a0a8b8' }}>
-                      {new Date(msg.created_at).toLocaleString('hu-HU')}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => handleDelete(msg.id)}
-                    style={{
-                      background: 'none',
-                      border: '1px solid #e0e3e8',
-                      borderRadius: 6,
-                      padding: '4px 10px',
-                      fontSize: 12,
-                      color: '#8a92a3',
-                      cursor: 'pointer',
-                      fontFamily: 'inherit',
-                      whiteSpace: 'nowrap',
-                      transition: 'color 0.15s, border-color 0.15s',
-                    }}
-                    onMouseEnter={e => { (e.target as HTMLButtonElement).style.color = '#cf2e2e'; (e.target as HTMLButtonElement).style.borderColor = '#cf2e2e' }}
-                    onMouseLeave={e => { (e.target as HTMLButtonElement).style.color = '#8a92a3'; (e.target as HTMLButtonElement).style.borderColor = '#e0e3e8' }}
-                  >
-                    Törlés
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </main>
+      </div>
 
       {/* Footer */}
-      <footer style={{ borderTop: '1px solid #e8eaed', padding: '20px 24px', textAlign: 'center', marginTop: 40 }}>
-        <span style={{ fontSize: 13, color: '#a0a8b8' }}>
-          © {new Date().getFullYear()} STRT Holding
-        </span>
-        <p style={{ margin: '6px 0 0', fontSize: 12, color: '#c0c8d8' }}>
-          Készítette: SysAI – AI használatával –{' '}
-          <a href="https://www.sysai.hu" target="_blank" rel="noopener noreferrer" style={{ color: '#ff6900', textDecoration: 'none' }}>
-            www.sysai.hu
+      <div style={{ borderTop: '1px solid #e8eaed', padding: '10px 16px', textAlign: 'center', background: '#fff' }}>
+        <span style={{ fontSize: 12, color: '#c0c8d8' }}>
+          © {new Date().getFullYear()} STRT Holding · Készítette:{' '}
+          <a href="https://www.sysai.hu" target="_blank" rel="noopener noreferrer"
+            style={{ color: '#ff6900', textDecoration: 'none', fontWeight: 500 }}>
+            SysAI
           </a>
-        </p>
-      </footer>
+          {' '}– AI használatával
+        </span>
+      </div>
     </div>
   )
 }
