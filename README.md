@@ -1,36 +1,32 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Üzenőfal
 
-## Getting Started
+Egyszerű publikus üzenőfal webalkalmazás. Üzenetet írhatsz, elmentheted az adatbázisba, és törölheted a bejegyzéseket.
 
-First, run the development server:
+**Stack:** Next.js · TypeScript · Tailwind CSS · Supabase · Vercel
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## Funkciók
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+- Üzenet írása és mentése Supabase adatbázisba
+- Üzenetek listázása fordított időrendben
+- Bejegyzések törlése
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Helyi fejlesztés
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. Klónozd a repót
+2. Másold az `.env.example` fájlt `.env.local` névre és töltsd ki a Supabase adatokkal:
+   ```
+   NEXT_PUBLIC_SUPABASE_URL=...
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+   ```
+3. Hozd létre a táblát a Supabase SQL Editorban (`supabase-schema.sql` alapján)
+4. `npm install && npm run dev`
 
-## Learn More
+## Supabase tábla
 
-To learn more about Next.js, take a look at the following resources:
+Futtasd a `supabase-schema.sql` fájl tartalmát a Supabase SQL Editorban.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Deployment (Vercel)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. Importáld a GitHub repót a Vercelbe
+2. Add meg a két environment variable-t (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`)
+3. Deploy

@@ -1,65 +1,109 @@
-import Image from "next/image";
+'use client'
+
+import { useEffect, useState } from 'react'
+import type { Message } from '@/lib/supabase'
 
 export default function Home() {
+  const [messages, setMessages] = useState<Message[]>([])
+  const [content, setContent] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [fetching, setFetching] = useState(true)
+
+  async function fetchMessages() {
+    const res = await fetch('/api/messages')
+    if (res.ok) {
+      const data = await res.json()
+      setMessages(data)
+    }
+    setFetching(false)
+  }
+
+  useEffect(() => {
+    fetchMessages()
+  }, [])
+
+  async function handleSave() {
+    if (!content.trim()) return
+    setLoading(true)
+
+    const res = await fetch('/api/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+    })
+
+    if (res.ok) {
+      setContent('')
+      await fetchMessages()
+    }
+    setLoading(false)
+  }
+
+  async function handleDelete(id: number) {
+    const res = await fetch(`/api/messages/${id}`, { method: 'DELETE' })
+    if (res.ok) {
+      setMessages((prev) => prev.filter((m) => m.id !== id))
+    }
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <main className="min-h-screen bg-gray-50 py-10 px-4">
+      <div className="max-w-xl mx-auto">
+        <h1 className="text-3xl font-bold text-center text-indigo-600 mb-8">
+          Üzenőfal
+        </h1>
+
+        {/* Beviteli mező */}
+        <div className="bg-white rounded-xl shadow p-6 mb-8">
+          <textarea
+            className="w-full border border-gray-300 rounded-lg p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-indigo-400"
+            rows={3}
+            placeholder="Írj egy üzenetet..."
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && e.ctrlKey) handleSave()
+            }}
+          />
+          <button
+            onClick={handleSave}
+            disabled={loading || !content.trim()}
+            className="mt-3 w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white font-semibold py-2 rounded-lg transition-colors"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            {loading ? 'Mentés...' : 'Mentés'}
+          </button>
         </div>
-      </main>
-    </div>
-  );
+
+        {/* Üzenetek listája */}
+        {fetching ? (
+          <p className="text-center text-gray-400">Betöltés...</p>
+        ) : messages.length === 0 ? (
+          <p className="text-center text-gray-400">Még nincs üzenet. Légy az első!</p>
+        ) : (
+          <ul className="space-y-3">
+            {messages.map((msg) => (
+              <li
+                key={msg.id}
+                className="bg-white rounded-xl shadow px-5 py-4 flex items-start justify-between gap-4"
+              >
+                <div className="flex-1">
+                  <p className="text-gray-800 text-sm whitespace-pre-wrap">{msg.content}</p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    {new Date(msg.created_at).toLocaleString('hu-HU')}
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleDelete(msg.id)}
+                  className="text-red-400 hover:text-red-600 text-xs font-medium shrink-0 mt-0.5 transition-colors"
+                  title="Törlés"
+                >
+                  Törlés
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </main>
+  )
 }
