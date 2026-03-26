@@ -204,6 +204,12 @@ export default function Home() {
         <span style={{ fontSize: 13, color: '#a0a8b8' }}>
           © {new Date().getFullYear()} STRT Holding
         </span>
+        <p style={{ margin: '6px 0 0', fontSize: 12, color: '#c0c8d8' }}>
+          Készítette: SysAI – AI használatával –{' '}
+          <a href="https://www.sysai.hu" target="_blank" rel="noopener noreferrer" style={{ color: '#ff6900', textDecoration: 'none' }}>
+            www.sysai.hu
+          </a>
+        </p>
       </footer>
     </div>
   )

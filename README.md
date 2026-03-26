@@ -30,3 +30,7 @@ Futtasd a `supabase-schema.sql` fájl tartalmát a Supabase SQL Editorban.
 1. Importáld a GitHub repót a Vercelbe
 2. Add meg a két environment variable-t (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`)
 3. Deploy
+
+---
+
+Készítette: **SysAI** – AI használatával – [www.sysai.hu](https://www.sysai.hu)
